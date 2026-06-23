@@ -1,21 +1,16 @@
 import streamlit as st
+import google.generativeai as genai
 import json
-import os
-from google import genai
-from google.genai import types
 
 st.set_page_config(page_title="Extractor", layout="wide")
 st.title("Systematic Review Data Extractor")
 
-# FIX: Explicitly get the API key
-api_key = st.secrets.get("GEMINI_API_KEY")
+# 1. Initialize API Key
+api_key = st.secrets["GEMINI_API_KEY"]
+genai.configure(api_key=api_key)
 
-if not api_key:
-    st.error("GEMINI_API_KEY is not set in Streamlit Secrets!")
-    st.stop()
-
-# Initialize client with the key
-client = genai.Client(api_key=api_key)
+# 2. Setup Model
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 user_fields = st.text_area("Fields (comma separated):", "Author, Year, Population, Intervention, Outcome")
 uploaded_file = st.file_uploader("Upload PDF", type="pdf")
@@ -23,20 +18,21 @@ uploaded_file = st.file_uploader("Upload PDF", type="pdf")
 if uploaded_file and st.button("Extract Data"):
     with st.spinner("Processing..."):
         try:
-            pdf_bytes = uploaded_file.getvalue()
+            # Upload file to Gemini API
+            pdf_data = uploaded_file.getvalue()
+            
+            # Using the File API
+            myfile = genai.upload_file(uploaded_file, mime_type="application/pdf")
             
             prompt = f"Extract {user_fields} from this PDF. Return ONLY valid JSON."
             
-            response = client.models.generate_content(
-                model='gemini-2.0-flash',
-                contents=[
-                    types.Part.from_bytes(data=pdf_bytes, mime_type='application/pdf'),
-                    prompt
-                ],
-                config=types.GenerateContentConfig(response_mime_type="application/json")
-            )
+            # Generate response
+            response = model.generate_content([myfile, prompt])
             
-            data = json.loads(response.text)
+            # Clean up the JSON string (removing markdown code blocks)
+            json_text = response.text.replace('```json', '').replace('```', '')
+            data = json.loads(json_text)
+            
             st.success("Extraction Complete!")
             st.json(data)
             
