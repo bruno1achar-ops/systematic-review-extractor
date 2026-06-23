@@ -4,67 +4,46 @@ import time
 from google import genai
 from google.genai import types
 
-# 1. UI Configuration
-st.set_page_config(page_title="Research Data Extractor", layout="wide")
+st.set_page_config(page_title="Extractor", layout="wide")
 st.title("Systematic Review Data Extractor")
 
-# 2. Setup Client
+# Setup Client
 try:
-    api_key = st.secrets["GEMINI_API_KEY"]
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 except Exception as e:
-    st.error(f"API Key issue: {e}")
+    st.error("Check API Key in Secrets.")
     st.stop()
 
-# 3. Dynamic Schema Definition
-st.subheader("Define Your Fields")
-user_fields = st.text_area("Enter fields to extract (comma separated):", 
-                          "Author, Year, Population, Intervention, Outcome")
-schema_list = [f.strip() for f in user_fields.split(",")]
+user_fields = st.text_area("Fields (comma separated):", "Author, Year, Population, Intervention, Outcome")
+uploaded_file = st.file_uploader("Upload PDF", type="pdf")
 
-# 4. File Upload
-uploaded_file = st.file_uploader("Upload Study PDF", type="pdf")
-
-# 5. Extraction Pipeline
 if uploaded_file and st.button("Extract Data"):
-    with st.spinner("Processing document..."):
+    with st.spinner("Processing..."):
         try:
-            # Read file as bytes
-            bytes_data = uploaded_file.getvalue()
+            # UPLOAD: Using the file object directly with the API
+            # Note: We are not using the File API's 'upload' if it's causing issues.
+            # Instead, we pass the file content directly.
+            pdf_bytes = uploaded_file.getvalue()
             
-            # Upload to Gemini File API
-            pdf_file = client.files.upload(
-                file=bytes_data, 
-                config={'display_name': uploaded_file.name, 'mime_type': 'application/pdf'}
-            )
+            # Using the model directly with file bytes
+            prompt = f"Extract {user_fields} from this PDF. Return ONLY valid JSON."
             
-            # Wait for processing
-            while pdf_file.state.name == "PROCESSING":
-                time.sleep(2)
-                pdf_file = client.files.get(name=pdf_file.name)
-            
-            # Formulate structured prompt
-            prompt = f"Extract {schema_list} from this PDF. Return strictly as a JSON object."
-            
-            # Generate structured response
             response = client.models.generate_content(
                 model='gemini-2.0-flash',
-                contents=[pdf_file, prompt],
+                contents=[
+                    types.Part.from_bytes(
+                        data=pdf_bytes,
+                        mime_type='application/pdf'
+                    ),
+                    prompt
+                ],
                 config=types.GenerateContentConfig(response_mime_type="application/json")
             )
             
-            # Display Results
             data = json.loads(response.text)
             st.success("Extraction Complete!")
             st.json(data)
             
-            # Download trigger
-            st.download_button(
-                label="Download JSON Data",
-                data=json.dumps(data, indent=4),
-                file_name="extracted_data.json",
-                mime="application/json"
-            )
-            
         except Exception as e:
-            st.error(f"Error during extraction: {str(e)}")
+            st.error(f"CRITICAL ERROR: {str(e)}")
+            st.exception(e) # This will show the full traceback on the screen
